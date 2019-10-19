@@ -74,7 +74,7 @@ pub(crate) fn create_callback<'ducc, 'callback>(
         assert_stack!(ctx, 1, {
             ffi::duk_require_stack(ctx, 2);
 
-            let ducc = Ducc { ctx, is_top: false };
+            let ducc = Ducc { ctx, root_ctx: ctx, is_top: false };
             let num_args = ffi::duk_get_top(ctx) as usize;
             let mut args = Vec::with_capacity(num_args);
             for i in 0..num_args {

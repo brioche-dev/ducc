@@ -35,6 +35,7 @@ use value::{FromValue, ToValue, Value};
 /// methods to violate security and safety guarantees made by this library.
 pub struct Ducc {
     pub(crate) ctx: *mut ffi::duk_context,
+    pub(crate) root_ctx: *mut ffi::duk_context,
     // Internally, a `ctx` can live in multiple `Ducc` instances (see `function::create_callback`),
     // so we need to make sure we only drop the Duktape heap in the top-level "grandparent" `Ducc`.
     pub(crate) is_top: bool,
@@ -43,7 +44,12 @@ pub struct Ducc {
 impl Ducc {
     /// Creates a new JavaScript execution environment.
     pub fn new() -> Ducc {
-        Ducc { ctx: unsafe { create_heap() }, is_top: true }
+        let ctx = unsafe { create_heap() };
+        Ducc {
+            ctx,
+            root_ctx: ctx,
+            is_top: true,
+        }
     }
 
     /// Returns the global object.
@@ -133,6 +139,60 @@ impl Ducc {
         unsafe {
             let any_map = get_any_map(self.ctx);
             (*any_map).remove(key)
+        }
+    }
+
+    pub fn with_new_thread<'ducc, R, F>(&'ducc self, func: F) -> R
+    where
+        for<'thread> F: 'ducc + FnOnce(&'thread Ducc) -> R,
+        R: 'ducc
+    {
+        unsafe {
+            assert_stack!(self.ctx, 0, {
+                ffi::duk_require_stack(self.ctx, 1);
+
+                let thread_idx = ffi::duk_push_thread(self.ctx);
+                let thread_ctx = ffi::duk_get_context(self.ctx, thread_idx);
+
+                let thread_ducc = Ducc {
+                    ctx: thread_ctx,
+                    root_ctx: self.ctx,
+                    is_top: false,
+                };
+
+                let result = func(&thread_ducc);
+
+                ffi::duk_pop(self.ctx);
+
+                result
+            })
+        }
+    }
+
+    pub fn with_new_thread_with_new_global_env<'ducc, R, F>(&'ducc self, func: F) -> R
+    where
+        for<'thread> F: 'ducc + FnOnce(&'thread Ducc) -> R,
+        R: 'ducc
+    {
+        unsafe {
+            assert_stack!(self.ctx, 0, {
+                ffi::duk_require_stack(self.ctx, 1);
+
+                let thread_idx = ffi::duk_push_thread_new_globalenv(self.ctx);
+                let thread_ctx = ffi::duk_get_context(self.ctx, thread_idx);
+
+                let thread_ducc = Ducc {
+                    ctx: thread_ctx,
+                    root_ctx: self.ctx,
+                    is_top: false,
+                };
+
+                let result = func(&thread_ducc);
+
+                ffi::duk_pop(self.ctx);
+
+                result
+            })
         }
     }
 
@@ -347,7 +407,7 @@ impl Ducc {
     }
 
     pub(crate) unsafe fn push_ref(&self, r: &Ref) {
-        assert!(r.ducc.ctx == self.ctx, "`Value` passed from one `Ducc` instance to another");
+        assert!(r.ducc.root_ctx == self.root_ctx, "`Value` passed from one `Ducc` instance to another");
         assert_stack!(self.ctx, 1, {
             ffi::duk_require_stack(self.ctx, 2);
             ffi::duk_push_heap_stash(self.ctx);

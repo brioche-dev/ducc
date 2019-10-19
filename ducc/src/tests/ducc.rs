@@ -32,6 +32,68 @@ fn no_duktape_global() {
 }
 
 #[test]
+fn thread_data_sharing() {
+    let ducc = Ducc::new();
+    let a = ducc.create_string("abc").unwrap();
+
+    let thread_func = |thread: &Ducc| -> String {
+        let b = thread.create_string("def").unwrap();
+        let this = thread.create_object();
+        this.set("a", a.clone()).unwrap();
+        this.set("b", b).unwrap();
+        let func = thread.compile("this.a + this.b", None).unwrap();
+        let value = func.call_method(this, ()).unwrap();
+        let result = ducc.coerce_string(value).unwrap();
+        result.to_string().unwrap()
+    };
+    let thread_1_result: String = ducc.with_new_thread(&thread_func);
+    assert_eq!(thread_1_result, "abcdef");
+    let thread_2_result = ducc.with_new_thread_with_new_global_env(&thread_func);
+    assert_eq!(thread_2_result, "abcdef");
+}
+
+#[test]
+fn thread_globals() {
+    let ducc = Ducc::new();
+    ducc.globals().set("foo", "foo").unwrap();
+    ducc.globals().set("o", {
+        let o = ducc.create_object();
+        o.set("a", "a");
+        o
+    }).unwrap();
+
+    let thread_1_result = ducc.with_new_thread(|thread| {
+        thread.globals().set("bar", "bar").unwrap();
+        ducc.globals().set("baz", "baz").unwrap();
+        let thread_1_value = thread.exec("
+            bar += 'x';
+            o.b = 'b';
+            foo + ' ' + bar + ' ' + baz + ' ' + o.a + ' ' + o.b
+        ", None, Default::default()).unwrap();
+        ducc.coerce_string(thread_1_value).unwrap().to_string().unwrap()
+    });
+    assert_eq!(thread_1_result, "foo barx baz a b");
+
+    let after_thread_1_value = ducc.exec("
+        foo + ' ' + bar + ' ' + baz + ' ' + o.a + ' ' + o.b
+    ", None, Default::default()).unwrap();
+    let after_thread_1_result = ducc.coerce_string(after_thread_1_value).unwrap().to_string().unwrap();
+    assert_eq!(after_thread_1_result, "foo barx baz a b");
+
+    let thread_2_result = ducc.with_new_thread_with_new_global_env(|thread| {
+        thread.globals().set("fizz", "fizz").unwrap();
+        ducc.globals().set("buzz", "buzz").unwrap();
+        let thread_2_value = thread.exec("
+            bar += 'y';
+            o.c = 'c';
+            foo + ' ' + bar + ' ' + baz + ' ' + fizz + ' ' + buzz + ' ' + o.a + ' ' + o.b + ' ' + o.c
+        ", None, Default::default()).unwrap();
+        ducc.coerce_string(thread_2_value).unwrap().to_string().unwrap()
+    });
+    assert_eq!(thread_2_result, "foo bar bax fizz buzz a b c")
+}
+
+#[test]
 fn user_data_drop() {
     let mut ducc = Ducc::new();
     let (count, data) = make_test_user_data();
