@@ -254,20 +254,25 @@ pub(crate) unsafe fn create_heap() -> *mut ffi::duk_context {
     let ctx = ffi::duk_create_heap(None, None, None, udata as *mut _, Some(fatal_handler));
     assert!(!ctx.is_null());
 
+    let any_map = Box::into_raw(Box::new(AnyMap::new()));
+
+    initialize_context(ctx, udata, any_map);
+
+    ctx
+}
+
+pub(crate) unsafe fn initialize_context(ctx: *mut ffi::duk_context, udata: *mut Udata, any_map: *mut AnyMap) {
     ffi::duk_require_stack(ctx, 1);
 
     ffi::duk_push_pointer(ctx, udata as *mut _);
     ffi::duk_put_global_string(ctx, UDATA.as_ptr());
 
-    let any_map = Box::into_raw(Box::new(AnyMap::new()));
     ffi::duk_push_pointer(ctx, any_map as *mut _);
     ffi::duk_put_global_string(ctx, ANYMAP.as_ptr());
 
     ffi::duk_push_global_object(ctx);
     ffi::duk_del_prop_string(ctx, -1, cstr!("Duktape"));
     ffi::duk_pop(ctx);
-
-    ctx
 }
 
 pub(crate) unsafe fn get_udata(ctx: *mut ffi::duk_context) -> *mut Udata {
