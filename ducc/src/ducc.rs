@@ -21,6 +21,7 @@ use util::{
     create_heap,
     get_any_map,
     get_udata,
+    initialize_context,
     pop_error,
     protect_duktape_closure,
     push_bytes,
@@ -180,6 +181,11 @@ impl Ducc {
 
                 let thread_idx = ffi::duk_push_thread_new_globalenv(self.ctx);
                 let thread_ctx = ffi::duk_get_context(self.ctx, thread_idx);
+
+                let udata = get_udata(self.ctx);
+                let any_map = get_any_map(self.ctx);
+
+                initialize_context(thread_ctx, udata, any_map);
 
                 let thread_ducc = Ducc {
                     ctx: thread_ctx,
