@@ -56,11 +56,10 @@ fn thread_data_sharing() {
 fn thread_globals() {
     let ducc = Ducc::new();
     ducc.globals().set("foo", "foo").unwrap();
-    ducc.globals().set("o", {
-        let o = ducc.create_object();
-        o.set("a", "a");
-        o
-    }).unwrap();
+
+    let o = ducc.create_object();
+    o.set("a", "a").unwrap();
+    ducc.globals().set("o", o.clone()).unwrap();
 
     let thread_1_result = ducc.with_new_thread(|thread| {
         thread.globals().set("bar", "bar").unwrap();
@@ -83,14 +82,20 @@ fn thread_globals() {
     let thread_2_result = ducc.with_new_thread_with_new_global_env(|thread| {
         thread.globals().set("fizz", "fizz").unwrap();
         ducc.globals().set("buzz", "buzz").unwrap();
+        thread.globals().set("o", o.clone()).unwrap();
         let thread_2_value = thread.exec("
-            bar += 'y';
             o.c = 'c';
-            foo + ' ' + bar + ' ' + baz + ' ' + fizz + ' ' + buzz + ' ' + o.a + ' ' + o.b + ' ' + o.c
+            typeof foo + ' ' + typeof bar + ' ' + typeof baz + ' ' + fizz + ' ' + typeof buzz + ' ' + o.a + ' ' + o.b + ' ' + o.c
         ", None, Default::default()).unwrap();
         ducc.coerce_string(thread_2_value).unwrap().to_string().unwrap()
     });
-    assert_eq!(thread_2_result, "foo bar bax fizz buzz a b c")
+    assert_eq!(thread_2_result, "undefined undefined undefined fizz undefined a b c");
+
+    let after_thread_2_value = ducc.exec("
+        foo + ' ' + bar + ' ' + baz + ' ' + typeof fizz + ' ' + buzz + ' ' + o.a + ' ' + o.b + ' ' + o.c
+    ", None, Default::default()).unwrap();
+    let after_thread_2_result = ducc.coerce_string(after_thread_2_value).unwrap().to_string().unwrap();
+    assert_eq!(after_thread_2_result, "foo barx baz undefined buzz a b c");
 }
 
 #[test]
